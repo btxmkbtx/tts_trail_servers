@@ -89,7 +89,7 @@ pip uninstall -y torch torchaudio transformers
 pip install -r python_service/requirements.txt
 ```
 
-3. 启动 Python XTTS 服务
+## 3. 启动 Python XTTS 服务
 
 ```bash
 source .venv/bin/activate
@@ -119,7 +119,7 @@ npm start
 
 默认监听：`http://127.0.0.1:3007`
 
-## 4.5 一键启动
+## 3+4 一键启动
 
 如果你希望自动检查依赖并同时启动 Node + Python，可直接执行：
 
@@ -158,7 +158,7 @@ PYTHON_BIN=python3.11 npm run start:all
 - 如果 `.venv` 已存在，脚本会继续复用当前环境。
 - 想切换版本时，先删除 `.venv` 再重新执行启动命令。
 
-## 5. 发送测试请求
+## 5. 发送测试请求（voice_id 可复用）
 
 准备一个**干净的参考人声**，例如 `sample.wav`：
 
@@ -167,7 +167,7 @@ PYTHON_BIN=python3.11 npm run start:all
 - 单人说话
 - 与目标语言尽量接近
 
-然后执行：
+首次上传参考音频（会自动生成 `voice_id`）：
 
 ```bash
 curl -X POST http://127.0.0.1:3007/tts \
@@ -182,10 +182,21 @@ curl -X POST http://127.0.0.1:3007/tts \
 {
   "message": "ok",
   "audioUrl": "/outputs/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.wav",
+  "voiceId": "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy",
+  "voiceSource": "new",
   "speakerSample": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.wav",
   "language": "ja",
   "model": "tts_models/multilingual/multi-dataset/xtts_v2"
 }
+```
+
+后续可直接复用 `voice_id`（无需再次上传音频）：
+
+```bash
+curl -X POST http://127.0.0.1:3007/tts \
+  -F 'text=こんにちは、これはvoice_id再利用のテストです。' \
+  -F 'language=ja' \
+  -F 'voice_id=yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy'
 ```
 
 浏览器打开返回的地址即可试听，例如：
@@ -206,7 +217,8 @@ http://127.0.0.1:3007/
 
 - 输入要合成的文本
 - 选择语言代码
-- 上传任意常见音频文件
+- 从下拉框选择已保存的 `voice_id`
+- 或上传新的参考音频（自动生成新的 `voice_id`）
 - 自动提交到后端
 - 返回后直接试听生成结果
 
@@ -222,7 +234,21 @@ http://127.0.0.1:3007/
 
 - `text`: 要合成的文本
 - `language`: 语言代码，例如 `ja`、`en`、`zh-cn`
-- `speaker`: 参考音频文件（可为任意常见格式，服务会先转成 `16kHz/mono wav`）
+- `voice_id`: 已保存声音 ID（可选）
+- `speaker`: 参考音频文件（可选，传入后会先转成 `16kHz/mono wav` 并生成/更新 voice）
+
+> `voice_id` 与 `speaker` 至少提供一个。
+
+### `GET /voices`
+
+获取已保存的 `voice_id` 列表（供前端下拉框使用）。
+
+### `POST /voices/register`
+
+仅注册声音，不做合成。`multipart/form-data` 参数：
+
+- `speaker`: 参考音频文件（必填）
+- `voice_id`: 自定义 ID（可选，不传则自动生成）
 
 ## 说明与限制
 

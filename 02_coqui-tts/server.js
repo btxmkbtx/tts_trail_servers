@@ -53,17 +53,81 @@ app.get('/health', async (_req, res) => {
   }
 });
 
-app.post('/tts', upload.single('speaker'), async (req, res) => {
-  const { text, language = 'ja' } = req.body;
+app.get('/voices', async (_req, res) => {
+  try {
+    const response = await fetch(`${PYTHON_SERVICE_URL}/voices`);
+    const payload = await response.json();
+
+    if (!response.ok) {
+      res.status(response.status).json(payload);
+      return;
+    }
+
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({
+      error: 'failed to load voices',
+      detail: error.message,
+    });
+  }
+});
+
+app.post('/voices/register', upload.single('speaker'), async (req, res) => {
   const speakerFile = req.file;
+  const voiceId = (req.body?.voice_id || '').trim() || undefined;
+
+  if (!speakerFile) {
+    res.status(400).json({ error: 'speaker file is required (multipart field name: speaker)' });
+    return;
+  }
+
+  try {
+    const response = await fetch(`${PYTHON_SERVICE_URL}/voices/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        speaker_wav_path: speakerFile.path,
+        speaker_original_name: speakerFile.originalname,
+        voice_id: voiceId,
+      }),
+    });
+
+    const payload = await response.json();
+
+    if (!response.ok) {
+      res.status(response.status).json(payload);
+      return;
+    }
+
+    res.json({
+      message: 'ok',
+      voiceId: payload.voice_id,
+      normalizedSpeakerSample: payload.normalized_speaker_path
+        ? path.basename(payload.normalized_speaker_path)
+        : null,
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'failed to register voice',
+      detail: error.message,
+    });
+  }
+});
+
+app.post('/tts', upload.single('speaker'), async (req, res) => {
+  const { text, language = 'ja', voice_id: requestedVoiceId = '' } = req.body;
+  const speakerFile = req.file;
+  const voiceId = requestedVoiceId.trim();
 
   if (!text || !text.trim()) {
     res.status(400).json({ error: 'text is required' });
     return;
   }
 
-  if (!speakerFile) {
-    res.status(400).json({ error: 'speaker file is required (multipart field name: speaker)' });
+  if (!speakerFile && !voiceId) {
+    res.status(400).json({ error: 'speaker file or voice_id is required' });
     return;
   }
 
@@ -79,7 +143,9 @@ app.post('/tts', upload.single('speaker'), async (req, res) => {
       body: JSON.stringify({
         text,
         language,
-        speaker_wav_path: speakerFile.path,
+        speaker_wav_path: speakerFile?.path,
+        speaker_original_name: speakerFile?.originalname,
+        voice_id: voiceId || undefined,
         output_path: outputPath,
       }),
     });
@@ -94,7 +160,9 @@ app.post('/tts', upload.single('speaker'), async (req, res) => {
     res.json({
       message: 'ok',
       audioUrl: `/outputs/${outputFilename}`,
-      speakerSample: path.basename(speakerFile.path),
+      speakerSample: speakerFile ? path.basename(speakerFile.path) : null,
+      voiceId: payload.voice_id || null,
+      voiceSource: payload.voice_source || null,
       normalizedSpeakerSample: payload.normalized_speaker_path
         ? path.basename(payload.normalized_speaker_path)
         : null,

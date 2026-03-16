@@ -77,10 +77,22 @@
         opacity: 0.6;
         cursor: progress;
       }
+      .secondary {
+        background: rgba(148, 163, 184, 0.2);
+        color: #e5e7eb;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+      }
       .row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 16px;
+      }
+      .inline {
+        display: flex;
+        gap: 8px;
+      }
+      .inline select {
+        flex: 1;
       }
       .panel {
         margin-top: 20px;
@@ -136,10 +148,20 @@
           </label>
 
           <label>
-            参考音频
-            <input type="file" name="speaker" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg" required />
+            已保存声音 (voice_id)
+            <div class="inline">
+              <select name="voice_id" id="voice-id-select">
+                <option value="">请选择（或上传新参考音频）</option>
+              </select>
+              <button type="button" id="refresh-voices" class="secondary">刷新</button>
+            </div>
           </label>
         </div>
+
+        <label>
+          新参考音频（可选，上传后会自动生成新 voice_id）
+          <input type="file" name="speaker" id="speaker-input" accept="audio/*,.wav,.mp3,.m4a,.aac,.flac,.ogg" />
+        </label>
 
         <button type="submit" id="submit-btn">生成语音</button>
       </form>
@@ -157,6 +179,57 @@
       const status = document.getElementById('status');
       const result = document.getElementById('result');
       const audio = document.getElementById('audio');
+      const voiceSelect = document.getElementById('voice-id-select');
+      const refreshVoicesBtn = document.getElementById('refresh-voices');
+      const speakerInput = document.getElementById('speaker-input');
+
+      async function loadVoices(preferredVoiceId = '') {
+        try {
+          const response = await fetch('/voices');
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.detail || payload.error || 'Failed to load voices');
+          }
+
+          const voices = Array.isArray(payload.voices) ? payload.voices : [];
+          const previous = preferredVoiceId || voiceSelect.value;
+
+          voiceSelect.innerHTML = '<option value="">请选择（或上传新参考音频）</option>';
+          for (const voice of voices) {
+            const option = document.createElement('option');
+            option.value = voice.voice_id;
+            option.textContent = voice.training_file_name || voice.voice_id;
+            voiceSelect.appendChild(option);
+          }
+
+          if (previous && voices.some((voice) => voice.voice_id === previous)) {
+            voiceSelect.value = previous;
+          }
+        } catch (error) {
+          status.textContent = `声音列表加载失败：${error.message}`;
+          status.className = 'error';
+        }
+      }
+
+      refreshVoicesBtn.addEventListener('click', async () => {
+        refreshVoicesBtn.disabled = true;
+        await loadVoices();
+        refreshVoicesBtn.disabled = false;
+      });
+
+      voiceSelect.addEventListener('change', () => {
+        if (voiceSelect.value) {
+          speakerInput.value = '';
+        }
+      });
+
+      speakerInput.addEventListener('change', () => {
+        if (speakerInput.files && speakerInput.files.length > 0) {
+          voiceSelect.value = '';
+        }
+      });
+
+      loadVoices();
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -169,6 +242,22 @@
 
         try {
           const formData = new FormData(form);
+          const selectedVoiceId = (formData.get('voice_id') || '').toString().trim();
+          const speakerFile = formData.get('speaker');
+          const hasSpeakerFile = speakerFile instanceof File && speakerFile.size > 0;
+
+          if (!selectedVoiceId && !hasSpeakerFile) {
+            throw new Error('请选择一个 voice_id，或上传新的参考音频。');
+          }
+
+          if (!selectedVoiceId) {
+            formData.delete('voice_id');
+          }
+
+          if (!hasSpeakerFile) {
+            formData.delete('speaker');
+          }
+
           const response = await fetch('/tts', {
             method: 'POST',
             body: formData,
@@ -186,9 +275,15 @@
           const absoluteAudioUrl = new URL(payload.audioUrl, window.location.origin).toString();
           result.innerHTML = `
             <p><strong>模型:</strong> <code>${payload.model}</code></p>
+            <p><strong>voice_id:</strong> <code>${payload.voiceId || 'n/a'}</code></p>
+            <p><strong>voice来源:</strong> <code>${payload.voiceSource || 'n/a'}</code></p>
             <p><strong>输出文件:</strong> <code>${absoluteAudioUrl}</code></p>
             <p><strong>标准化参考音频:</strong> <code>${payload.normalizedSpeakerSample || 'n/a'}</code></p>
           `;
+
+          if (payload.voiceId) {
+            await loadVoices(payload.voiceId);
+          }
 
           audio.src = absoluteAudioUrl;
           audio.hidden = false;
