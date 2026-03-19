@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IndexTTS2 Demo</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(180deg, #0f172a, #111827);
+        color: #e5e7eb;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(760px, 100%);
+        background: rgba(17, 24, 39, 0.92);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.8rem;
+      }
+      p {
+        color: #cbd5e1;
+      }
+      form {
+        display: grid;
+        gap: 16px;
+      }
+      label {
+        display: grid;
+        gap: 8px;
+        font-weight: 600;
+      }
+      textarea,
+      input,
+      select,
+      button {
+        font: inherit;
+      }
+      textarea,
+      input[type="text"],
+      input[type="number"],
+      select,
+      input[type="file"] {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.8);
+        color: inherit;
+        padding: 12px 14px;
+        box-sizing: border-box;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+      .hint {
+        color: #94a3b8;
+        font-size: 0.92rem;
+      }
+      .checkbox {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 500;
+      }
+      .checkbox input {
+        width: auto;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 18px;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa);
+        color: white;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: progress;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      .panel {
+        margin-top: 20px;
+        padding: 16px;
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+      .muted {
+        color: #94a3b8;
+        font-size: 0.95rem;
+      }
+      .error {
+        color: #fca5a5;
+        white-space: pre-wrap;
+      }
+      .success {
+        color: #86efac;
+      }
+      audio {
+        width: 100%;
+        margin-top: 12px;
+      }
+      code {
+        word-break: break-all;
+      }
+      .progress-wrap {
+        background: rgba(15, 23, 42, 0.8);
+        border-radius: 999px;
+        height: 8px;
+        overflow: hidden;
+        margin-top: 10px;
+      }
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa);
+        border-radius: 999px;
+        width: 0%;
+        transition: width 0.4s ease;
+      }
+      @media (max-width: 640px) {
+        .row {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>IndexTTS2 Demo</h1>
+      <p>这个页面参考了 02_coqui-tts 的布局，用于体验 IndexTTS2 的声音生成质量。参考音频会先统一转换成 24kHz / mono / wav，再交给 IndexTTS2 推理。</p>
+
+      <form id="tts-form">
+        <label>
+          合成文本
+          <textarea name="text" required>こんにちは、これは IndexTTS2 の比較デモです。</textarea>
+        </label>
+
+        <div class="row">
+          <label>
+            语言代码（仅用于对比记录）
+            <select name="language">
+              <option value="zh-cn">中文</option>
+              <option value="en">English</option>
+              <option value="ja" selected>日本語</option>
+            </select>
+            <span class="hint">IndexTTS2 主要根据文本内容进行推理，这个选项用于和 02 的输入保持一致。</span>
+          </label>
+
+          <label>
+            情感强度 `emo_alpha`
+            <input type="number" name="emo_alpha" value="0.6" min="0" max="1" step="0.1" />
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            参考音频 / 视频
+            <input type="file" name="speaker" accept="audio/*,video/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.m4v,.webm" required />
+          </label>
+
+          <label>
+            情感参考音频 / 视频（可选）
+            <input type="file" name="emotion_speaker" accept="audio/*,video/*,.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.m4v,.webm" />
+          </label>
+        </div>
+
+        <label class="checkbox">
+          <input type="checkbox" name="use_emo_text" value="true" />
+          使用文本情感引导 `use_emo_text`
+        </label>
+
+        <label>
+          情感文本 `emo_text`（可选）
+          <input type="text" name="emo_text" placeholder="例如：很惊讶、很害怕、很开心" />
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" name="use_random" value="true" />
+          启用随机情感采样 `use_random`
+        </label>
+
+        <button type="submit" id="submit-btn">生成语音</button>
+      </form>
+
+      <section class="panel">
+        <div id="status" class="muted">等待提交。</div>
+        <div class="progress-wrap" id="progress-wrap" hidden>
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <div id="result"></div>
+        <audio id="audio" controls hidden></audio>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById('tts-form');
+      const button = document.getElementById('submit-btn');
+      const status = document.getElementById('status');
+      const progressWrap = document.getElementById('progress-wrap');
+      const progressBar = document.getElementById('progress-bar');
+      const result = document.getElementById('result');
+      const audio = document.getElementById('audio');
+
+      function setProgress(percent, desc) {
+        progressWrap.hidden = false;
+        progressBar.style.width = `${percent}%`;
+        status.textContent = `${desc}  (${percent}%)`;
+        status.className = 'muted';
+      }
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        audio.hidden = true;
+        audio.removeAttribute('src');
+        result.innerHTML = '';
+        progressWrap.hidden = false;
+        progressBar.style.width = '0%';
+        status.textContent = '连接中…';
+        status.className = 'muted';
+
+        try {
+          const formData = new FormData(form);
+          const response = await fetch('/tts/stream', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+
+            for (const part of parts) {
+              const dataLine = part.split('\n').find(l => l.startsWith('data: '));
+              if (!dataLine) continue;
+              let evt;
+              try { evt = JSON.parse(dataLine.slice(6)); } catch { continue; }
+
+              if (evt.type === 'progress') {
+                setProgress(evt.percent, evt.desc);
+              } else if (evt.type === 'done') {
+                progressBar.style.width = '100%';
+                status.textContent = '生成成功。';
+                status.className = 'success';
+
+                const absoluteAudioUrl = new URL(evt.audioUrl, window.location.origin).toString();
+                result.innerHTML = `
+                  <p><strong>模型:</strong> <code>${evt.model}</code></p>
+                  <p><strong>运行时:</strong> <code>${evt.runtime || 'IndexTTS2'}</code></p>
+                  <p><strong>设备:</strong> <code>${evt.device || 'auto'}</code></p>
+                  <p><strong>输出文件:</strong> <code>${absoluteAudioUrl}</code></p>
+                `;
+                audio.src = absoluteAudioUrl;
+                audio.hidden = false;
+                audio.load();
+              } else if (evt.type === 'error') {
+                throw new Error(evt.detail || 'Unknown error');
+              }
+            }
+          }
+        } catch (error) {
+          status.textContent = '生成失败。';
+          status.className = 'error';
+          result.innerHTML = `<div class="error">${error.message}</div>`;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
