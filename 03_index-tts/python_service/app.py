@@ -8,7 +8,10 @@ import threading
 import uuid
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+import json
+import re
+
+from flask import Flask, Response, jsonify, request, stream_with_context
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = (BASE_DIR / "uploads").resolve()
@@ -256,5 +259,155 @@ def synthesize():
     )
 
 
+@app.post("/synthesize/stream")
+def synthesize_stream():
+    data = request.get_json(silent=True) or {}
+
+    text = (data.get("text") or "").strip()
+    speaker_wav_path = data.get("speaker_wav_path")
+    emo_audio_prompt_path = data.get("emo_audio_prompt_path")
+    output_path = data.get("output_path")
+    emo_text = (data.get("emo_text") or "").strip() or None
+    use_emo_text = bool(data.get("use_emo_text", False))
+    use_random = bool(data.get("use_random", False))
+    emo_alpha = float(data.get("emo_alpha") or 1.0)
+
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    if not speaker_wav_path:
+        return jsonify({"error": "speaker_wav_path is required"}), 400
+    if not output_path:
+        return jsonify({"error": "output_path is required"}), 400
+    if shutil.which(UV_BIN) is None:
+        return jsonify({"error": f"{UV_BIN} is not available"}), 500
+    if not VENDOR_DIR.exists():
+        return jsonify({"error": "IndexTTS vendor repository is missing"}), 500
+    if missing_model_files():
+        return jsonify({
+            "error": "IndexTTS model files are missing",
+            "missing_model_files": missing_model_files(),
+        }), 500
+
+    speaker_path = Path(speaker_wav_path).resolve()
+    destination = Path(output_path).resolve()
+
+    if not is_within(UPLOAD_DIR, speaker_path):
+        return jsonify({"error": "speaker_wav_path must be inside uploads/"}), 400
+    if not is_within(OUTPUT_DIR, destination):
+        return jsonify({"error": "output_path must be inside outputs/"}), 400
+    if not speaker_path.exists():
+        return jsonify({"error": "speaker_wav_path does not exist"}), 400
+
+    try:
+        normalized_speaker_path = normalize_media(speaker_path)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+
+    normalized_emo_audio_path = None
+    if emo_audio_prompt_path:
+        emo_path = Path(emo_audio_prompt_path).resolve()
+        if not is_within(UPLOAD_DIR, emo_path):
+            return jsonify({"error": "emo_audio_prompt_path must be inside uploads/"}), 400
+        if not emo_path.exists():
+            return jsonify({"error": "emo_audio_prompt_path does not exist"}), 400
+        try:
+            normalized_emo_audio_path = normalize_media(emo_path)
+        except RuntimeError as e:
+            return jsonify({"error": str(e)}), 500
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    command = [
+        UV_BIN, "run", "python",
+        str((Path(__file__).resolve().parent / "vendor_infer.py").resolve()),
+        "--vendor-dir", str(VENDOR_DIR),
+        "--cfg-path", str(CFG_PATH),
+        "--model-dir", str(MODEL_DIR),
+        "--speaker", str(normalized_speaker_path),
+        "--text", text,
+        "--output", str(destination),
+        "--device", INDEX_TTS_DEVICE,
+        "--emo-alpha", str(emo_alpha),
+    ]
+    if normalized_emo_audio_path is not None:
+        command.extend(["--emo-audio", str(normalized_emo_audio_path)])
+    if use_emo_text:
+        command.append("--use-emo-text")
+    if emo_text:
+        command.extend(["--emo-text", emo_text])
+    if use_random:
+        command.append("--use-random")
+    if INDEX_TTS_USE_FP16:
+        command.append("--use-fp16")
+    if INDEX_TTS_USE_CUDA_KERNEL:
+        command.append("--use-cuda-kernel")
+    if INDEX_TTS_USE_DEEPSPEED:
+        command.append("--use-deepspeed")
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{VENDOR_DIR}:{env.get('PYTHONPATH', '')}" if env.get("PYTHONPATH") else str(VENDOR_DIR)
+
+    def generate():
+        proc = subprocess.Popen(
+            command,
+            cwd=VENDOR_DIR,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+
+        def _drain_stdout() -> None:
+            for line in proc.stdout:
+                stdout_lines.append(line)
+
+        stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+        stdout_thread.start()
+
+        for line in proc.stderr:
+            print(line, end="", file=sys.stderr, flush=True)
+            stderr_lines.append(line)
+            m = re.match(r'\[PROGRESS\]\s+(\d+)%\s+(.*)', line.strip())
+            if m:
+                event = json.dumps({
+                    "type": "progress",
+                    "percent": int(m.group(1)),
+                    "desc": m.group(2).strip(),
+                })
+                yield f"data: {event}\n\n"
+
+        proc.wait()
+        stdout_thread.join()
+
+        stdout_data = "".join(stdout_lines)
+        stderr_data = "".join(stderr_lines)
+        returncode = proc.returncode
+
+        if returncode != 0:
+            print("[IndexTTS] inference failed (returncode={})".format(returncode))
+            detail = stderr_data.strip() or stdout_data.strip() or "Unknown error"
+            yield f"data: {json.dumps({'type': 'error', 'detail': detail})}\n\n"
+            return
+
+        runtime = "IndexTTS2"
+        device = INDEX_TTS_DEVICE
+        for line in stdout_data.splitlines():
+            if line.startswith("RUNTIME="):
+                runtime = line.split("=", 1)[1].strip() or runtime
+            if line.startswith("DEVICE="):
+                device = line.split("=", 1)[1].strip() or device
+
+        yield f"data: {json.dumps({'type': 'done', 'output_path': str(destination), 'model': 'IndexTeam/IndexTTS-2', 'runtime': runtime, 'device': device})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=PYTHON_SERVICE_PORT, debug=False)
+    app.run(host="127.0.0.1", port=PYTHON_SERVICE_PORT, debug=False, threaded=True)

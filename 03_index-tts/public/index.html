@@ -121,6 +121,20 @@
       code {
         word-break: break-all;
       }
+      .progress-wrap {
+        background: rgba(15, 23, 42, 0.8);
+        border-radius: 999px;
+        height: 8px;
+        overflow: hidden;
+        margin-top: 10px;
+      }
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa);
+        border-radius: 999px;
+        width: 0%;
+        transition: width 0.4s ease;
+      }
       @media (max-width: 640px) {
         .row {
           grid-template-columns: 1fr;
@@ -188,6 +202,9 @@
 
       <section class="panel">
         <div id="status" class="muted">等待提交。</div>
+        <div class="progress-wrap" id="progress-wrap" hidden>
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
         <div id="result"></div>
         <audio id="audio" controls hidden></audio>
       </section>
@@ -197,8 +214,17 @@
       const form = document.getElementById('tts-form');
       const button = document.getElementById('submit-btn');
       const status = document.getElementById('status');
+      const progressWrap = document.getElementById('progress-wrap');
+      const progressBar = document.getElementById('progress-bar');
       const result = document.getElementById('result');
       const audio = document.getElementById('audio');
+
+      function setProgress(percent, desc) {
+        progressWrap.hidden = false;
+        progressBar.style.width = `${percent}%`;
+        status.textContent = `${desc}  (${percent}%)`;
+        status.className = 'muted';
+      }
 
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -206,37 +232,63 @@
         audio.hidden = true;
         audio.removeAttribute('src');
         result.innerHTML = '';
-        status.textContent = '生成中，请稍候。IndexTTS2 首次加载会比较慢。';
+        progressWrap.hidden = false;
+        progressBar.style.width = '0%';
+        status.textContent = '连接中…';
         status.className = 'muted';
 
         try {
           const formData = new FormData(form);
-          const response = await fetch('/tts', {
+          const response = await fetch('/tts/stream', {
             method: 'POST',
             body: formData,
           });
 
-          const payload = await response.json();
           if (!response.ok) {
-            throw new Error(payload.detail || payload.error || 'Unknown error');
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
           }
 
-          status.textContent = '生成成功。';
-          status.className = 'success';
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
 
-          const absoluteAudioUrl = new URL(payload.audioUrl, window.location.origin).toString();
-          result.innerHTML = `
-            <p><strong>模型:</strong> <code>${payload.model}</code></p>
-            <p><strong>运行时:</strong> <code>${payload.runtime || 'IndexTTS2'}</code></p>
-            <p><strong>设备:</strong> <code>${payload.device || 'auto'}</code></p>
-            <p><strong>输出文件:</strong> <code>${absoluteAudioUrl}</code></p>
-            <p><strong>标准化参考音频:</strong> <code>${payload.normalizedSpeakerSample || 'n/a'}</code></p>
-            <p><strong>标准化情感参考音频:</strong> <code>${payload.normalizedEmotionSpeakerSample || 'n/a'}</code></p>
-          `;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
 
-          audio.src = absoluteAudioUrl;
-          audio.hidden = false;
-          audio.load();
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+
+            for (const part of parts) {
+              const dataLine = part.split('\n').find(l => l.startsWith('data: '));
+              if (!dataLine) continue;
+              let evt;
+              try { evt = JSON.parse(dataLine.slice(6)); } catch { continue; }
+
+              if (evt.type === 'progress') {
+                setProgress(evt.percent, evt.desc);
+              } else if (evt.type === 'done') {
+                progressBar.style.width = '100%';
+                status.textContent = '生成成功。';
+                status.className = 'success';
+
+                const absoluteAudioUrl = new URL(evt.audioUrl, window.location.origin).toString();
+                result.innerHTML = `
+                  <p><strong>模型:</strong> <code>${evt.model}</code></p>
+                  <p><strong>运行时:</strong> <code>${evt.runtime || 'IndexTTS2'}</code></p>
+                  <p><strong>设备:</strong> <code>${evt.device || 'auto'}</code></p>
+                  <p><strong>输出文件:</strong> <code>${absoluteAudioUrl}</code></p>
+                `;
+                audio.src = absoluteAudioUrl;
+                audio.hidden = false;
+                audio.load();
+              } else if (evt.type === 'error') {
+                throw new Error(evt.detail || 'Unknown error');
+              }
+            }
+          }
         } catch (error) {
           status.textContent = '生成失败。';
           status.className = 'error';

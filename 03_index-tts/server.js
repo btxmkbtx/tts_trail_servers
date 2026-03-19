@@ -134,6 +134,86 @@ app.post('/tts', upload.fields([
   }
 });
 
+app.post('/tts/stream', upload.fields([
+  { name: 'speaker', maxCount: 1 },
+  { name: 'emotion_speaker', maxCount: 1 },
+]), async (req, res) => {
+  const text = (req.body?.text || '').trim();
+  const language = (req.body?.language || 'ja').trim();
+  const emoText = (req.body?.emo_text || '').trim();
+  const emoAlpha = req.body?.emo_alpha;
+  const useEmoText = req.body?.use_emo_text === 'true';
+  const useRandom = req.body?.use_random === 'true';
+  const speakerFile = req.files?.speaker?.[0];
+  const emotionSpeakerFile = req.files?.emotion_speaker?.[0];
+
+  if (!text) {
+    res.status(400).json({ error: 'text is required' });
+    return;
+  }
+  if (!speakerFile) {
+    res.status(400).json({ error: 'speaker file is required (multipart field name: speaker)' });
+    return;
+  }
+
+  const outputFilename = `${randomUUID()}.wav`;
+  const outputPath = path.join(OUTPUT_DIR, outputFilename);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  try {
+    const flaskResponse = await fetch(`${PYTHON_SERVICE_URL}/synthesize/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        language,
+        speaker_wav_path: speakerFile.path,
+        emo_audio_prompt_path: emotionSpeakerFile?.path,
+        emo_alpha: emoAlpha,
+        use_emo_text: useEmoText,
+        emo_text: emoText || undefined,
+        use_random: useRandom,
+        output_path: outputPath,
+      }),
+    });
+
+    const reader = flaskResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        const dataLine = part.split('\n').find(l => l.startsWith('data: '));
+        if (!dataLine) continue;
+        try {
+          const event = JSON.parse(dataLine.slice(6));
+          if (event.type === 'done') {
+            event.audioUrl = `/outputs/${outputFilename}`;
+          }
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        } catch {
+          res.write(part + '\n\n');
+        }
+      }
+    }
+  } catch (error) {
+    res.write(`data: ${JSON.stringify({ type: 'error', detail: error.message })}\n\n`);
+  } finally {
+    res.end();
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Node API listening on http://127.0.0.1:${PORT}`);
   console.log(`Using Python service: ${PYTHON_SERVICE_URL}`);
