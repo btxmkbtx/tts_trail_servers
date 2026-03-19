@@ -1,0 +1,11 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+outputs/*.wav
+uploads/*
+!uploads/.gitkeep
+!uploads/normalized/
+uploads/normalized/*
+!uploads/normalized/.gitkeep
+vendor/index-tts/
