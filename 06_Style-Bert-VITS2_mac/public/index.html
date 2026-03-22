@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Style-Bert-VITS2 Demo</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(180deg, #0f172a, #111827);
+        color: #e5e7eb;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: min(800px, 100%);
+        background: rgba(17, 24, 39, 0.92);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      }
+      h1 { margin-top: 0; font-size: 1.8rem; }
+      p { color: #cbd5e1; }
+      form { display: grid; gap: 16px; }
+      label { display: grid; gap: 8px; font-weight: 600; }
+      textarea, input, select, button { font: inherit; }
+      textarea,
+      input[type="text"],
+      input[type="number"],
+      select {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.8);
+        color: inherit;
+        padding: 12px 14px;
+        box-sizing: border-box;
+      }
+      textarea { min-height: 120px; resize: vertical; }
+      .hint { color: #94a3b8; font-size: 0.88rem; font-weight: 400; }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 18px;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa);
+        color: white;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: progress; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+      .panel {
+        margin-top: 20px;
+        padding: 16px;
+        border-radius: 16px;
+        background: rgba(15, 23, 42, 0.7);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+      }
+      .muted { color: #94a3b8; font-size: 0.95rem; }
+      .error { color: #fca5a5; white-space: pre-wrap; }
+      .success { color: #86efac; }
+      audio { width: 100%; margin-top: 12px; }
+      code { word-break: break-all; }
+      .no-models {
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: rgba(251, 191, 36, 0.1);
+        border: 1px solid rgba(251, 191, 36, 0.3);
+        color: #fbbf24;
+        font-size: 0.92rem;
+      }
+      .progress-wrap {
+        background: rgba(15, 23, 42, 0.8);
+        border-radius: 999px;
+        height: 8px;
+        overflow: hidden;
+        margin-top: 10px;
+      }
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #60a5fa, #a78bfa);
+        border-radius: 999px;
+        width: 0%;
+        transition: width 0.4s ease;
+      }
+      @media (max-width: 640px) {
+        .row, .row3 { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Style-Bert-VITS2 Demo</h1>
+      <p>将模型放置在 <code>models/</code> 目录下（每个模型一个子目录，需包含 <code>*.safetensors</code>、<code>config.json</code>、<code>style_vectors.npy</code>），刷新页面后即可选择。</p>
+
+      <div id="no-models-banner" class="no-models" hidden>
+        未检测到可用模型。请在 <code>models/</code> 目录下放置模型文件后刷新页面。
+      </div>
+
+      <form id="tts-form">
+        <div class="row">
+          <label>
+            模型
+            <select name="model_name" id="model-select" required>
+              <option value="">-- 加载中... --</option>
+            </select>
+          </label>
+
+          <label>
+            语言
+            <select name="language">
+              <option value="ja" selected>日本語</option>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            说话人
+            <select name="speaker_id" id="speaker-select">
+              <option value="0">0</option>
+            </select>
+            <span class="hint">选择模型后自动更新</span>
+          </label>
+
+          <label>
+            风格
+            <select name="style" id="style-select">
+              <option value="Neutral">Neutral</option>
+            </select>
+            <span class="hint">选择模型后自动更新</span>
+          </label>
+        </div>
+
+        <label>
+          合成文本
+          <textarea name="text" required>こんにちは、Style-Bert-VITS2 のデモへようこそ。</textarea>
+        </label>
+
+        <div class="row3">
+          <label>
+            风格强度 <code>style_weight</code>
+            <input type="number" name="style_weight" value="5" min="0" max="50" step="0.5" />
+            <span class="hint">默认 5.0</span>
+          </label>
+
+          <label>
+            语速 <code>length</code>
+            <input type="number" name="length" value="1.0" min="0.1" max="3.0" step="0.1" />
+            <span class="hint">1.0 = 正常</span>
+          </label>
+
+          <label>
+            音高随机性 <code>sdp_ratio</code>
+            <input type="number" name="sdp_ratio" value="0.2" min="0" max="1" step="0.05" />
+            <span class="hint">默认 0.2</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            噪声 <code>noise</code>
+            <input type="number" name="noise" value="0.6" min="0" max="1" step="0.05" />
+            <span class="hint">默认 0.6</span>
+          </label>
+
+          <label>
+            时长噪声 <code>noisew</code>
+            <input type="number" name="noisew" value="0.8" min="0" max="1" step="0.05" />
+            <span class="hint">默认 0.8</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            音调 <code>pitch_scale</code>
+            <input type="number" name="pitch_scale" value="1.0" min="0.5" max="2.0" step="0.05" />
+            <span class="hint">1.0 = 原始音调，&lt;1 降调，&gt;1 升调</span>
+          </label>
+
+          <label>
+            抑扬幅度 <code>intonation_scale</code>
+            <input type="number" name="intonation_scale" value="1.0" min="0.0" max="3.0" step="0.1" />
+            <span class="hint">1.0 = 正常，越大起伏越明显</span>
+          </label>
+        </div>
+
+        <button type="submit" id="submit-btn">生成语音</button>
+      </form>
+
+      <section class="panel">
+        <div id="status" class="muted">等待提交。</div>
+        <div class="progress-wrap" id="progress-wrap" hidden>
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <div id="result"></div>
+        <audio id="audio" controls hidden></audio>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById('tts-form');
+      const button = document.getElementById('submit-btn');
+      const status = document.getElementById('status');
+      const progressWrap = document.getElementById('progress-wrap');
+      const progressBar = document.getElementById('progress-bar');
+      const result = document.getElementById('result');
+      const audio = document.getElementById('audio');
+      const modelSelect = document.getElementById('model-select');
+      const speakerSelect = document.getElementById('speaker-select');
+      const styleSelect = document.getElementById('style-select');
+      const noModelsBanner = document.getElementById('no-models-banner');
+
+      function setProgress(percent, desc) {
+        progressWrap.hidden = false;
+        progressBar.style.width = `${percent}%`;
+        status.textContent = `${desc}  (${percent}%)`;
+        status.className = 'muted';
+      }
+
+      function populateSelect(select, items, valueKey, labelKey) {
+        select.innerHTML = '';
+        items.forEach((item, i) => {
+          const opt = document.createElement('option');
+          opt.value = valueKey ? item[valueKey] : item;
+          opt.textContent = labelKey ? item[labelKey] : item;
+          if (i === 0) opt.selected = true;
+          select.appendChild(opt);
+        });
+      }
+
+      async function loadModelInfo(modelName) {
+        if (!modelName) return;
+        try {
+          const res = await fetch(`/models/${encodeURIComponent(modelName)}`);
+          const data = await res.json();
+
+          // Populate speakers (value = index, label = name)
+          speakerSelect.innerHTML = '';
+          (data.speakers || ['0']).forEach((spk, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = spk;
+            speakerSelect.appendChild(opt);
+          });
+
+          // Populate styles
+          styleSelect.innerHTML = '';
+          (data.styles || ['Neutral']).forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            styleSelect.appendChild(opt);
+          });
+        } catch (e) {
+          console.warn('Failed to load model info:', e);
+        }
+      }
+
+      modelSelect.addEventListener('change', () => loadModelInfo(modelSelect.value));
+
+      // Load model list on startup
+      (async () => {
+        try {
+          const res = await fetch('/models');
+          const data = await res.json();
+          const models = data.models || [];
+
+          modelSelect.innerHTML = '';
+          if (models.length === 0) {
+            noModelsBanner.hidden = false;
+            button.disabled = true;
+            modelSelect.innerHTML = '<option value="">-- モデルなし --</option>';
+            return;
+          }
+
+          models.forEach((m, i) => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            if (i === 0) opt.selected = true;
+            modelSelect.appendChild(opt);
+          });
+
+          await loadModelInfo(models[0]);
+        } catch (e) {
+          modelSelect.innerHTML = '<option value="">-- 読み込み失敗 --</option>';
+          status.textContent = 'モデル一覧の取得に失敗しました: ' + e.message;
+          status.className = 'error';
+        }
+      })();
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        audio.hidden = true;
+        audio.removeAttribute('src');
+        result.innerHTML = '';
+        progressWrap.hidden = false;
+        progressBar.style.width = '0%';
+        status.textContent = '接続中…';
+        status.className = 'muted';
+
+        const fd = new FormData(form);
+        const body = {};
+        for (const [k, v] of fd.entries()) body[k] = v;
+
+        try {
+          const response = await fetch('/tts/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+
+            for (const part of parts) {
+              const dataLine = part.split('\n').find(l => l.startsWith('data: '));
+              if (!dataLine) continue;
+              let evt;
+              try { evt = JSON.parse(dataLine.slice(6)); } catch { continue; }
+
+              if (evt.type === 'progress') {
+                setProgress(evt.percent, evt.desc);
+              } else if (evt.type === 'done') {
+                progressBar.style.width = '100%';
+                status.textContent = '生成成功。';
+                status.className = 'success';
+
+                const absoluteAudioUrl = new URL(evt.audioUrl, window.location.origin).toString();
+                result.innerHTML = `
+                  <p><strong>模型:</strong> <code>${evt.model}</code></p>
+                  <p><strong>设备:</strong> <code>${evt.device || 'cpu'}</code></p>
+                  <p><strong>输出文件:</strong> <code>${absoluteAudioUrl}</code></p>
+                `;
+                audio.src = absoluteAudioUrl;
+                audio.hidden = false;
+                audio.load();
+              } else if (evt.type === 'error') {
+                throw new Error(evt.detail || 'Unknown error');
+              }
+            }
+          }
+        } catch (error) {
+          status.textContent = '生成失败。';
+          status.className = 'error';
+          result.innerHTML = `<div class="error">${error.message}</div>`;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

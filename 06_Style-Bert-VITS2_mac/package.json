@@ -1,0 +1,19 @@
+{
+  "name": "style-bert-vits2-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Style-Bert-VITS2 local TTS service",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "start:python": "${PYTHON_BIN:-python3} python_service/app.py",
+    "start:all": "bash ./start.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.2"
+  }
+}

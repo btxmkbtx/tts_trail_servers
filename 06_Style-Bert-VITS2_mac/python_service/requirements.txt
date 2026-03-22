@@ -1,0 +1,4 @@
+flask
+style-bert-vits2
+soundfile
+numpy<2.0
