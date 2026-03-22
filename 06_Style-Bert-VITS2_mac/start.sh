@@ -90,7 +90,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "[start] Launching Python service on port $PYTHON_SERVICE_PORT ..."
-PYTHON_SERVICE_PORT="$PYTHON_SERVICE_PORT" python python_service/app.py &
+PYTHON_SERVICE_PORT="$PYTHON_SERVICE_PORT" "$ROOT_DIR/.venv/bin/python" python_service/app.py &
 PY_PID=$!
 
 echo "[start] Launching Node service on port $SBV2_NODE_PORT ..."

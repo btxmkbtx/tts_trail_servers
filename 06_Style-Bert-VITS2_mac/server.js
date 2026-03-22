@@ -1,7 +1,11 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { randomUUID } = require('crypto');
+function timestamp() {
+  const d = new Date();
+  const pad = (n, l = 2) => String(n).padStart(l, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
 
 const app = express();
 const PORT = Number(process.env.PORT || 3009);
@@ -76,7 +80,7 @@ app.post('/tts', async (req, res) => {
     return;
   }
 
-  const outputFilename = `${randomUUID()}.wav`;
+  const outputFilename = `${timestamp()}.wav`;
   const outputPath = path.join(OUTPUT_DIR, outputFilename);
 
   try {
@@ -122,7 +126,7 @@ app.post('/tts/stream', async (req, res) => {
     return;
   }
 
-  const outputFilename = `${randomUUID()}.wav`;
+  const outputFilename = `${timestamp()}.wav`;
   const outputPath = path.join(OUTPUT_DIR, outputFilename);
 
   res.setHeader('Content-Type', 'text/event-stream');
