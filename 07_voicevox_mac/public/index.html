@@ -223,9 +223,9 @@
             });
           });
 
-          // show portrait for default selection
-          const first = speakerSel.options[0];
-          if (first) updatePortrait(first.dataset.uuid, first.dataset.name);
+          // set default selection to speaker id=84, fallback to first
+          const defaultOpt = Array.from(speakerSel.options).find(o => o.value === '84') || speakerSel.options[0];
+          if (defaultOpt) { defaultOpt.selected = true; updatePortrait(defaultOpt.dataset.uuid, defaultOpt.dataset.name); }
 
           if (speakerSel.options.length === 0) {
             warnBanner.hidden = false;
