@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VOICEVOX Demo</title>
+    <style>
+      :root { color-scheme: light dark; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body {
+        margin: 0; min-height: 100vh;
+        background: linear-gradient(180deg, #0f172a, #111827);
+        color: #e5e7eb; display: grid; place-items: center; padding: 24px;
+      }
+      .card {
+        width: min(800px, 100%);
+        background: rgba(17, 24, 39, 0.92);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 20px; padding: 24px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+      }
+      h1 { margin-top: 0; font-size: 1.8rem; }
+      p  { color: #cbd5e1; }
+      form { display: grid; gap: 16px; }
+      label { display: grid; gap: 8px; font-weight: 600; }
+      textarea, input, select, button { font: inherit; }
+      textarea, input[type="number"], select {
+        width: 100%; border-radius: 12px;
+        border: 1px solid rgba(148,163,184,0.3);
+        background: rgba(15,23,42,0.8); color: inherit;
+        padding: 12px 14px; box-sizing: border-box;
+      }
+      textarea { min-height: 120px; resize: vertical; }
+      .hint { color: #94a3b8; font-size: 0.88rem; font-weight: 400; }
+      button {
+        border: 0; border-radius: 999px; padding: 12px 18px;
+        background: linear-gradient(90deg, #34d399, #60a5fa);
+        color: white; font-weight: 700; cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: progress; }
+      .row  { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+      .panel {
+        margin-top: 20px; padding: 16px; border-radius: 16px;
+        background: rgba(15,23,42,0.7);
+        border: 1px solid rgba(148,163,184,0.2);
+      }
+      .muted   { color: #94a3b8; font-size: 0.95rem; }
+      .error   { color: #fca5a5; white-space: pre-wrap; }
+      .success { color: #86efac; }
+      audio { width: 100%; margin-top: 12px; }
+      code  { word-break: break-all; }
+      .speaker-portrait {
+        width: 100%; max-height: 260px; object-fit: contain;
+        border-radius: 12px; background: rgba(15,23,42,0.6);
+        border: 1px solid rgba(148,163,184,0.15);
+        display: block;
+      }
+      .portrait-wrap { position: relative; min-height: 80px; }
+      .portrait-name {
+        position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.55); border-radius: 999px;
+        padding: 2px 12px; font-size: 0.82rem; white-space: nowrap;
+        pointer-events: none;
+      }
+      .warn-banner {
+        padding: 12px 16px; border-radius: 12px;
+        background: rgba(251,191,36,0.1);
+        border: 1px solid rgba(251,191,36,0.3);
+        color: #fbbf24; font-size: 0.92rem;
+      }
+      .progress-wrap {
+        background: rgba(15,23,42,0.8); border-radius: 999px;
+        height: 8px; overflow: hidden; margin-top: 10px;
+      }
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #34d399, #60a5fa);
+        border-radius: 999px; width: 0%; transition: width 0.4s ease;
+      }
+      @media (max-width: 640px) { .row, .row3 { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>VOICEVOX Demo</h1>
+      <p>基于 <strong>VOICEVOX Engine</strong> 的本地 TTS 服务。选择说话人和风格后输入文本合成语音。</p>
+
+      <div id="warn-banner" class="warn-banner" hidden>
+        无法连接到 VOICEVOX Engine。请先运行 <code>bash ./start.sh</code>。
+      </div>
+
+      <form id="tts-form">
+        <div class="row">
+          <label>
+            说话人 / 风格
+            <select name="speaker" id="speaker-select" required>
+              <option value="">-- 加载中... --</option>
+            </select>
+            <span class="hint">说话人名称（风格）</span>
+          </label>
+
+          <div class="portrait-wrap">
+            <img id="portrait-img" class="speaker-portrait" src="" alt="" hidden />
+            <span id="portrait-name" class="portrait-name" hidden></span>
+          </div>
+        </div>
+
+        <label>
+          合成文本
+          <textarea name="text" required>こんにちは、VOICEVOXのデモへようこそ。</textarea>
+        </label>
+
+        <div class="row3">
+          <label>
+            语速 <code>speedScale</code>
+            <input type="number" name="speedScale" value="1.05" min="0.5" max="2.0" step="0.05" />
+            <span class="hint">1.0 = 正常</span>
+          </label>
+          <label>
+            音调 <code>pitchScale</code>
+            <input type="number" name="pitchScale" value="0.03" min="-0.15" max="0.15" step="0.01" />
+            <span class="hint">0.0 = 默认</span>
+          </label>
+          <label>
+            抑扬 <code>intonationScale</code>
+            <input type="number" name="intonationScale" value="1.3" min="0.0" max="2.0" step="0.1" />
+            <span class="hint">1.0 = 默认</span>
+          </label>
+        </div>
+
+        <div class="row">
+          <label>
+            音量 <code>volumeScale</code>
+            <input type="number" name="volumeScale" value="1.0" min="0.0" max="2.0" step="0.1" />
+            <span class="hint">1.0 = 默认</span>
+          </label>
+          <label>
+            采样率 <code>outputSamplingRate</code>
+            <select name="outputSamplingRate">
+              <option value="24000" selected>24000 Hz</option>
+              <option value="44100">44100 Hz</option>
+            </select>
+          </label>
+        </div>
+
+        <button type="submit" id="submit-btn">生成语音</button>
+      </form>
+
+      <section class="panel">
+        <div id="status" class="muted">等待提交。</div>
+        <div class="progress-wrap" id="progress-wrap" hidden>
+          <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <div id="result"></div>
+        <audio id="audio" controls hidden></audio>
+      </section>
+    </main>
+
+    <script>
+      const form         = document.getElementById('tts-form');
+      const button       = document.getElementById('submit-btn');
+      const status       = document.getElementById('status');
+      const progressWrap = document.getElementById('progress-wrap');
+      const progressBar  = document.getElementById('progress-bar');
+      const result       = document.getElementById('result');
+      const audio        = document.getElementById('audio');
+      const speakerSel   = document.getElementById('speaker-select');
+      const warnBanner   = document.getElementById('warn-banner');
+      const portraitImg  = document.getElementById('portrait-img');
+      const portraitName = document.getElementById('portrait-name');
+
+      // uuid → base64 portrait cache
+      const portraitCache = {};
+
+      async function updatePortrait(uuid, speakerName) {
+        if (!uuid) return;
+        try {
+          if (!portraitCache[uuid]) {
+            const res = await fetch(`/speaker-info?speaker_uuid=${encodeURIComponent(uuid)}`);
+            const info = await res.json();
+            portraitCache[uuid] = info.portrait || null;
+          }
+          const b64 = portraitCache[uuid];
+          if (b64) {
+            portraitImg.src = `data:image/png;base64,${b64}`;
+            portraitImg.alt = speakerName;
+            portraitImg.hidden = false;
+            portraitName.textContent = speakerName;
+            portraitName.hidden = false;
+          }
+        } catch (_) {}
+      }
+
+      function setProgress(percent, desc) {
+        progressWrap.hidden = false;
+        progressBar.style.width = `${percent}%`;
+        status.textContent = `${desc}  (${percent}%)`;
+        status.className = 'muted';
+      }
+
+      speakerSel.addEventListener('change', () => {
+        const opt = speakerSel.selectedOptions[0];
+        if (opt) updatePortrait(opt.dataset.uuid, opt.dataset.name);
+      });
+
+      // Load speakers on startup
+      (async () => {
+        try {
+          const res = await fetch('/speakers');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const speakers = await res.json();
+
+          speakerSel.innerHTML = '';
+          // store uuid on each option for portrait lookup
+          speakers.forEach(spk => {
+            spk.styles.forEach(style => {
+              const opt = document.createElement('option');
+              opt.value = style.id;
+              opt.textContent = `${spk.name}（${style.name}）`;
+              opt.dataset.uuid = spk.speaker_uuid;
+              opt.dataset.name = spk.name;
+              speakerSel.appendChild(opt);
+            });
+          });
+
+          // show portrait for default selection
+          const first = speakerSel.options[0];
+          if (first) updatePortrait(first.dataset.uuid, first.dataset.name);
+
+          if (speakerSel.options.length === 0) {
+            warnBanner.hidden = false;
+            button.disabled = true;
+          }
+        } catch (e) {
+          warnBanner.hidden = false;
+          button.disabled = true;
+          speakerSel.innerHTML = '<option value="">-- 接続失敗 --</option>';
+          status.textContent = 'VOICEVOX Engine に接続できません: ' + e.message;
+          status.className = 'error';
+        }
+      })();
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        audio.hidden = true;
+        audio.removeAttribute('src');
+        result.innerHTML = '';
+        progressWrap.hidden = false;
+        progressBar.style.width = '0%';
+        status.textContent = '接続中…';
+        status.className = 'muted';
+
+        const fd = new FormData(form);
+        const body = {};
+        for (const [k, v] of fd.entries()) body[k] = v;
+
+        try {
+          const response = await fetch('/tts/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.detail || payload.error || `HTTP ${response.status}`);
+          }
+
+          const reader  = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+
+            for (const part of parts) {
+              const dataLine = part.split('\n').find(l => l.startsWith('data: '));
+              if (!dataLine) continue;
+              let evt;
+              try { evt = JSON.parse(dataLine.slice(6)); } catch { continue; }
+
+              if (evt.type === 'progress') {
+                setProgress(evt.percent, evt.desc);
+              } else if (evt.type === 'done') {
+                progressBar.style.width = '100%';
+                status.textContent = '生成成功。';
+                status.className = 'success';
+                const audioUrl = new URL(evt.audioUrl, window.location.origin).toString();
+                result.innerHTML = `
+                  <p><strong>模型:</strong> <code>${evt.model}</code></p>
+                  <p><strong>说话人 ID:</strong> <code>${evt.speaker}</code></p>
+                  <p><strong>输出文件:</strong> <code>${audioUrl}</code></p>
+                `;
+                audio.src = audioUrl;
+                audio.hidden = false;
+                audio.load();
+              } else if (evt.type === 'error') {
+                throw new Error(evt.detail || 'Unknown error');
+              }
+            }
+          }
+        } catch (error) {
+          status.textContent = '生成失败。';
+          status.className = 'error';
+          result.innerHTML = `<div class="error">${error.message}</div>`;
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

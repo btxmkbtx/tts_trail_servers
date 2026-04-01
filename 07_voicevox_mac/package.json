@@ -1,0 +1,13 @@
+{
+  "name": "voicevox-server",
+  "version": "1.0.0",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "start:all": "bash ./start.sh",
+    "download:engine": "bash ./scripts/download_engine.sh"
+  }
+}
