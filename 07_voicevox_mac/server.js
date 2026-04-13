@@ -1,6 +1,43 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { execFileSync } = require('child_process');
+
+const SPLIT_THRESHOLD = 500; // 超过此字数才分段
+const SEGMENT_MAX_LEN = 360; // 每段字数上限
+
+// 按「、」切分后，贪心拼接成每段 ≤ SEGMENT_MAX_LEN 的分段数组
+function buildSegments(text) {
+  const clauses = text.split('、').reduce((acc, c, i, arr) => {
+    acc.push(i < arr.length - 1 ? c + '、' : c);
+    return acc;
+  }, []).filter(s => s.length > 0);
+
+  const segments = [];
+  let current = '';
+  for (const clause of clauses) {
+    if (current.length + clause.length <= SEGMENT_MAX_LEN) {
+      current += clause;
+    } else {
+      if (current) segments.push(current);
+      current = clause; // 单个 clause 超过上限时直接作为一段
+    }
+  }
+  if (current) segments.push(current);
+  return segments;
+}
+
+function mergeWavFiles(segPaths, outputPath) {
+  const listFile = path.join(os.tmpdir(), `vv_concat_${Date.now()}.txt`);
+  fs.writeFileSync(listFile, segPaths.map(p => `file '${p}'`).join('\n'));
+  try {
+    execFileSync('ffmpeg', ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', outputPath]);
+  } finally {
+    fs.unlinkSync(listFile);
+    segPaths.forEach(p => { try { fs.unlinkSync(p); } catch (_) {} });
+  }
+}
 
 function timestamp() {
   const d = new Date();
@@ -23,15 +60,11 @@ app.use('/outputs', express.static(OUTPUT_DIR));
 // Health
 // ---------------------------------------------------------------------------
 
-app.get('/health', async (req, res) => {
-  let vvReady = false;
-  let vvVersion = null;
+app.get('/health', async (_req, res) => {
+  let vvReady = false, vvVersion = null;
   try {
     const r = await fetch(`${VOICEVOX_URL}/version`);
-    if (r.ok) {
-      vvVersion = await r.text();
-      vvReady = true;
-    }
+    if (r.ok) { vvVersion = await r.text(); vvReady = true; }
   } catch (_) {}
   res.json({ node: true, voicevox: vvReady, voicevox_version: vvVersion, voicevox_url: VOICEVOX_URL });
 });
@@ -40,7 +73,7 @@ app.get('/health', async (req, res) => {
 // Speakers proxy
 // ---------------------------------------------------------------------------
 
-app.get('/speakers', async (req, res) => {
+app.get('/speakers', async (_req, res) => {
   try {
     const r = await fetch(`${VOICEVOX_URL}/speakers`);
     if (!r.ok) { res.status(502).json({ error: 'VOICEVOX engine error' }); return; }
@@ -64,62 +97,68 @@ app.get('/speaker-info', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// 単セグメント合成ヘルパー
+// ---------------------------------------------------------------------------
+
+async function synthesizeOne(segText, speaker, params) {
+  const qr = await fetch(
+    `${VOICEVOX_URL}/audio_query?text=${encodeURIComponent(segText)}&speaker=${speaker}`,
+    { method: 'POST' }
+  );
+  if (!qr.ok) throw new Error(`audio_query failed: ${await qr.text()}`);
+  const query = await qr.json();
+
+  const { speedScale, pitchScale, intonationScale, volumeScale, outputSamplingRate, outputStereo } = params;
+  if (speedScale         !== undefined) query.speedScale         = parseFloat(speedScale);
+  if (pitchScale         !== undefined) query.pitchScale         = parseFloat(pitchScale);
+  if (intonationScale    !== undefined) query.intonationScale    = parseFloat(intonationScale);
+  if (volumeScale        !== undefined) query.volumeScale        = parseFloat(volumeScale);
+  if (outputSamplingRate !== undefined) query.outputSamplingRate = parseInt(outputSamplingRate);
+  if (outputStereo       !== undefined) query.outputStereo       = Boolean(outputStereo);
+
+  const sr = await fetch(
+    `${VOICEVOX_URL}/synthesis?speaker=${speaker}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(query) }
+  );
+  if (!sr.ok) throw new Error(`synthesis failed: ${await sr.text()}`);
+  return Buffer.from(await sr.arrayBuffer());
+}
+
+// ---------------------------------------------------------------------------
 // TTS (sync)
 // ---------------------------------------------------------------------------
 
 app.post('/tts', async (req, res) => {
-  const {
-    text, speaker,
-    speedScale, pitchScale, intonationScale, volumeScale,
-    outputSamplingRate, outputStereo,
-  } = req.body || {};
+  const { text, speaker, speedScale, pitchScale, intonationScale, volumeScale, outputSamplingRate, outputStereo } = req.body || {};
 
   if (!text || !String(text).trim()) { res.status(400).json({ error: 'text is required' }); return; }
   if (speaker === undefined || speaker === null) { res.status(400).json({ error: 'speaker is required' }); return; }
 
+  const src = String(text).trim();
+  const params = { speedScale, pitchScale, intonationScale, volumeScale, outputSamplingRate, outputStereo };
+  const ts = timestamp();
+
   try {
-    // Step 1: audio_query
-    const queryRes = await fetch(
-      `${VOICEVOX_URL}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`,
-      { method: 'POST' }
-    );
-    if (!queryRes.ok) {
-      const detail = await queryRes.text();
-      res.status(502).json({ error: 'audio_query failed', detail });
-      return;
+    if (src.length <= SPLIT_THRESHOLD) {
+      const buf = await synthesizeOne(src, speaker, params);
+      const filename = `${ts}.wav`;
+      fs.writeFileSync(path.join(OUTPUT_DIR, filename), buf);
+      res.json({ message: 'ok', model: 'VOICEVOX', speaker, segments: 1, audioUrl: `/outputs/${filename}` });
+    } else {
+      const segments = buildSegments(src);
+      console.log(`[VOICEVOX] 分段合成: ${src.length}字 → ${segments.length}段`);
+      const segPaths = [];
+      for (let i = 0; i < segments.length; i++) {
+        console.log(`  段${i + 1}/${segments.length}(${segments[i].length}字): ${segments[i]}`);
+        const buf = await synthesizeOne(segments[i], speaker, params);
+        const segPath = path.join(os.tmpdir(), `vv_seg_${ts}_${i}.wav`);
+        fs.writeFileSync(segPath, buf);
+        segPaths.push(segPath);
+      }
+      const filename = `${ts}.wav`;
+      mergeWavFiles(segPaths, path.join(OUTPUT_DIR, filename));
+      res.json({ message: 'ok', model: 'VOICEVOX', speaker, segments: segments.length, audioUrl: `/outputs/${filename}` });
     }
-    const query = await queryRes.json();
-
-    // Apply optional overrides
-    if (speedScale      !== undefined) query.speedScale      = parseFloat(speedScale);
-    if (pitchScale      !== undefined) query.pitchScale      = parseFloat(pitchScale);
-    if (intonationScale !== undefined) query.intonationScale = parseFloat(intonationScale);
-    if (volumeScale     !== undefined) query.volumeScale     = parseFloat(volumeScale);
-    if (outputSamplingRate !== undefined) query.outputSamplingRate = parseInt(outputSamplingRate);
-    if (outputStereo    !== undefined) query.outputStereo    = Boolean(outputStereo);
-
-    // Step 2: synthesis
-    const synthRes = await fetch(
-      `${VOICEVOX_URL}/synthesis?speaker=${speaker}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(query) }
-    );
-    if (!synthRes.ok) {
-      const detail = await synthRes.text();
-      res.status(502).json({ error: 'synthesis failed', detail });
-      return;
-    }
-
-    const filename = `${timestamp()}.wav`;
-    const outputPath = path.join(OUTPUT_DIR, filename);
-    const buf = Buffer.from(await synthRes.arrayBuffer());
-    fs.writeFileSync(outputPath, buf);
-
-    res.json({
-      message: 'ok',
-      model: 'VOICEVOX',
-      speaker,
-      audioUrl: `/outputs/${filename}`,
-    });
   } catch (e) {
     console.error('[VOICEVOX] tts error:', e.message);
     res.status(500).json({ error: e.message });
@@ -131,11 +170,7 @@ app.post('/tts', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 app.post('/tts/stream', async (req, res) => {
-  const {
-    text, speaker,
-    speedScale, pitchScale, intonationScale, volumeScale,
-    outputSamplingRate, outputStereo,
-  } = req.body || {};
+  const { text, speaker, speedScale, pitchScale, intonationScale, volumeScale, outputSamplingRate, outputStereo } = req.body || {};
 
   if (!text || !String(text).trim()) { res.status(400).json({ error: 'text is required' }); return; }
   if (speaker === undefined || speaker === null) { res.status(400).json({ error: 'speaker is required' }); return; }
@@ -145,46 +180,39 @@ app.post('/tts/stream', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
 
   const send = (obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const src = String(text).trim();
+  const params = { speedScale, pitchScale, intonationScale, volumeScale, outputSamplingRate, outputStereo };
+  const ts = timestamp();
+
+  console.log(`[VOICEVOX] 合成テキスト(${src.length}字): ${src}`);
 
   try {
-    send({ type: 'progress', percent: 20, desc: 'テキスト解析中 (audio_query)...' });
-
-    const queryRes = await fetch(
-      `${VOICEVOX_URL}/audio_query?text=${encodeURIComponent(text)}&speaker=${speaker}`,
-      { method: 'POST' }
-    );
-    if (!queryRes.ok) {
-      send({ type: 'error', detail: `audio_query failed: ${await queryRes.text()}` });
-      res.end(); return;
+    if (src.length <= SPLIT_THRESHOLD) {
+      send({ type: 'progress', percent: 20, desc: 'テキスト解析中 (audio_query)...' });
+      const buf = await synthesizeOne(src, speaker, params);
+      send({ type: 'progress', percent: 90, desc: '音声ファイル保存中...' });
+      const filename = `${ts}.wav`;
+      fs.writeFileSync(path.join(OUTPUT_DIR, filename), buf);
+      send({ type: 'done', model: 'VOICEVOX', speaker, segments: 1, audioUrl: `/outputs/${filename}` });
+    } else {
+      const segments = buildSegments(src);
+      console.log(`[VOICEVOX] 分段合成: ${src.length}字 → ${segments.length}段`);
+      send({ type: 'progress', percent: 5, desc: `テキストを ${segments.length} 段落に分割しました` });
+      const segPaths = [];
+      for (let i = 0; i < segments.length; i++) {
+        console.log(`  段${i + 1}/${segments.length}(${segments[i].length}字): ${segments[i]}`);
+        const percent = Math.round(5 + (i / segments.length) * 80);
+        send({ type: 'progress', percent, desc: `合成中 ${i + 1}/${segments.length}` });
+        const buf = await synthesizeOne(segments[i], speaker, params);
+        const segPath = path.join(os.tmpdir(), `vv_seg_${ts}_${i}.wav`);
+        fs.writeFileSync(segPath, buf);
+        segPaths.push(segPath);
+      }
+      send({ type: 'progress', percent: 90, desc: '音声ファイルを結合中 (ffmpeg)...' });
+      const filename = `${ts}.wav`;
+      mergeWavFiles(segPaths, path.join(OUTPUT_DIR, filename));
+      send({ type: 'done', model: 'VOICEVOX', speaker, segments: segments.length, audioUrl: `/outputs/${filename}` });
     }
-    const query = await queryRes.json();
-
-    if (speedScale      !== undefined) query.speedScale      = parseFloat(speedScale);
-    if (pitchScale      !== undefined) query.pitchScale      = parseFloat(pitchScale);
-    if (intonationScale !== undefined) query.intonationScale = parseFloat(intonationScale);
-    if (volumeScale     !== undefined) query.volumeScale     = parseFloat(volumeScale);
-    if (outputSamplingRate !== undefined) query.outputSamplingRate = parseInt(outputSamplingRate);
-    if (outputStereo    !== undefined) query.outputStereo    = Boolean(outputStereo);
-
-    send({ type: 'progress', percent: 60, desc: '音声合成中 (synthesis)...' });
-
-    const synthRes = await fetch(
-      `${VOICEVOX_URL}/synthesis?speaker=${speaker}`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(query) }
-    );
-    if (!synthRes.ok) {
-      send({ type: 'error', detail: `synthesis failed: ${await synthRes.text()}` });
-      res.end(); return;
-    }
-
-    send({ type: 'progress', percent: 90, desc: '音声ファイル保存中...' });
-
-    const filename = `${timestamp()}.wav`;
-    const outputPath = path.join(OUTPUT_DIR, filename);
-    const buf = Buffer.from(await synthRes.arrayBuffer());
-    fs.writeFileSync(outputPath, buf);
-
-    send({ type: 'done', model: 'VOICEVOX', speaker, audioUrl: `/outputs/${filename}` });
   } catch (e) {
     console.error('[VOICEVOX] stream error:', e.message);
     send({ type: 'error', detail: e.message });
