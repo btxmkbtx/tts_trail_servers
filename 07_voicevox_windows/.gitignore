@@ -1,0 +1,4 @@
+node_modules/
+engine/
+outputs/
+.engine_download/

@@ -3,7 +3,20 @@
     "allow": [
       "WebFetch(domain:voicevox.github.io)",
       "WebSearch",
-      "WebFetch(domain:deepwiki.com)"
+      "WebFetch(domain:deepwiki.com)",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri \"https://github.com/VOICEVOX/voicevox_engine/releases/download/0.25.1/voicevox_engine-windows-nvidia-0.25.1.7z.003\" -Method Head -UseBasicParsing; Write-Host \"[.003] EXISTS - Size: $\\([math]::Round\\($r.Headers.'Content-Length'[0] / 1MB, 1\\)\\) MB\" } catch { if \\($_.Exception.Response\\) { Write-Host \"[.003] HTTP $\\([int]$_.Exception.Response.StatusCode\\)\" } else { Write-Host \"[.003] Error: $\\($_.Exception.Message\\)\" } }; try { $r = Invoke-WebRequest -Uri \"https://github.com/VOICEVOX/voicevox_engine/releases/download/0.25.1/voicevox_engine-windows-nvidia-0.25.1.7z.002\" -Method Head -UseBasicParsing; Write-Host \"[.002] EXISTS - Size: $\\([math]::Round\\($r.Headers.'Content-Length'[0] / 1MB, 1\\)\\) MB\" } catch { Write-Host \"[.002] Error: $\\($_.Exception.Message\\)\" })",
+      "Bash(powershell -ExecutionPolicy Bypass -File ./scripts/download_engine.ps1)",
+      "Bash(\"D:/Install/7zip/7z.exe\" l *)",
+      "Bash(mkdir -p extracted)",
+      "Bash(\"D:/Install/7zip/7z.exe\" x *)",
+      "Bash(powershell -ExecutionPolicy Bypass -File ./start.ps1)",
+      "Bash(curl -s http://127.0.0.1:3010/health)",
+      "Bash(curl -s -X POST http://127.0.0.1:3010/tts -H \"Content-Type: application/json\" -d '{\"text\":\"こんにちは、テストです\",\"speaker\":3}')",
+      "Bash(\"d:/02_ALL_WORKSPACE/reactWK/06_git_code/tts_trail_servers/07_voicevox_windows/engine/run.exe\" --help)",
+      "PowerShell(Get-Process -Name \"run\" -ErrorAction SilentlyContinue | Stop-Process -Force; Get-Process -Name \"node\" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq \"\" } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Write-Host \"Cleanup done\")",
+      "Bash(nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader)",
+      "Bash(time curl *)",
+      "PowerShell(Stop-Process -Force)"
     ]
   }
 }

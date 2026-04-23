@@ -1,0 +1,13 @@
+{
+  "name": "voicevox-server-windows",
+  "version": "1.0.0",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "start:all": "powershell -ExecutionPolicy Bypass -File ./start.ps1",
+    "download:engine": "powershell -ExecutionPolicy Bypass -File ./scripts/download_engine.ps1"
+  }
+}
